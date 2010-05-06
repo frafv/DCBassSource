@@ -1,0 +1,2 @@
+*.h       mime-type=text/x-c++hdr
+*.dll     binary

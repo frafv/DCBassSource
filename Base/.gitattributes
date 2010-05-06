@@ -1,0 +1,4 @@
+*.pas            mime-type=text/pascal
+*.res            binary
+DCBassSource.dof delphi=7
+DCBassSource.dpr delphi=7
