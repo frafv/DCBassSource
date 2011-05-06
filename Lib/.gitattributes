@@ -1,2 +1,5 @@
 *.h       mime-type=text/x-c++hdr
-*.dll     binary
+*.dll     binary platform=x86
+*.lib     binary platform=x86
+x64/*.dll binary platform=x64
+x64/*.lib binary platform=x64
