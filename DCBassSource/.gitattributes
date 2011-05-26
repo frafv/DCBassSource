@@ -1,5 +1,6 @@
 *.cpp                                   mime-type=text/x-c++src
 *.h                                     mime-type=text/x-c++hdr
+*.rc                         encoding=unicode
 *.vcxproj                               mime-type=application/xml
 *.vcxproj.filters                       mime-type=application/xml
 *.sln                                   mime-type=application/x-sln

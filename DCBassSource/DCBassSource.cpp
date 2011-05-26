@@ -74,6 +74,7 @@ BassExtension BASS_EXTENSIONS[] = {
     {_T(".ape"),  false, _T("bass_ape.dll")},
     {_T(".flac"), false, _T("bassflac.dll")},
     {_T(".m4a"),  false, _T("bass_aac.dll")},
+    {_T(".mp4"),  false, _T("bass_aac.dll")},
     {_T(".mac"),  false, _T("bass_ape.dll")},
     {_T(".mp3"),  false, _T("bass.dll")},
     {_T(".ogg"),  false, _T("bass.dll")},
@@ -152,7 +153,7 @@ function DllGetClassObject(const CLSID, IID: TGUID; var Obj): HResult;
 function DllCanUnloadNow: HResult;
 */
 
-bool RegisterFormat(LPCTSTR format) /*
+bool RegisterFormat(LPCTSTR format, bool exist) /*
 function RegisterFormat(AFormat: WideString): Boolean;
 */{
   LPTSTR fileName;//: WideString;
@@ -165,11 +166,36 @@ function RegisterFormat(AFormat: WideString): Boolean;
   if (*format == '.')
     format++;
 
-  return GetPrivateProfileInt(_T("Register"), format, 0, fileName) == 1;
+  switch(GetPrivateProfileInt(_T("Register"), format, 0, fileName))
+  {
+  case 1:
+    return true;
+  case 2:
+    return !exist;
+  default:
+    return false;
+  }
 }
 
-void RegWriteString(HKEY key, LPCTSTR name, LPCTSTR value) {
+void RegWriteString(HKEY key, LPCTSTR name, LPCTSTR value)
+{
   RegSetValueEx(key, name, 0, REG_SZ, (BYTE*)value, DWORD((_tcslen(value)+1) * sizeof(TCHAR)));
+}
+
+bool RegReadString(HKEY key, LPCTSTR name, LPTSTR value, int len)
+{
+  DWORD type;
+  DWORD cbuf = len * sizeof(TCHAR);
+  if (RegQueryValueEx(key, name, NULL, &type, (LPBYTE)value, &cbuf) != ERROR_SUCCESS)
+    return false;
+  switch(type)
+  {
+  case REG_EXPAND_SZ:
+  case REG_SZ:
+    return true;
+  default:
+    return false;
+  }
 }
 
 //
@@ -181,35 +207,36 @@ STDAPI DllRegisterServer() /*
 function DllRegisterServer: HResult;
 */{
   HKEY reg, reg2;//: TRegistry;
-  LPCTSTR guidStr;//: WideString;
+  //guidStr: WideString;
   //i: Integer;
   LPCTSTR ext;//: WideString;
   //path: WideString;
-  LPCTSTR dllPath;//: WideString;
-  LPOLESTR guidStrW; HRESULT result;
-  if (FAILED(result = StringFromCLSID(CLSID_DCBassSource, &guidStrW)))
-    return result;
+  LPTSTR dllPath;//: WideString;
+  LPTSTR plugin;
+  dllPath = GetFilterDirectory(PathBuffer2);
+  plugin = dllPath + _tcslen(dllPath);
 
-  try {
-  guidStr = FromLPWSTR(guidStrW, TextBuffer, TextBufferLength);
-  if (RegCreateKey(HKEY_CLASSES_ROOT, DIRECTSHOW_SOURCE_FILTER_PATH, &reg) == ERROR_SUCCESS) {
+  if (RegCreateKeyEx(HKEY_CLASSES_ROOT, DIRECTSHOW_SOURCE_FILTER_PATH, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &reg, NULL) == ERROR_SUCCESS) {
   try {
 
   for (int i = 0; i < BASS_EXTENSIONS_COUNT; i++)
   {
     ext = BASS_EXTENSIONS[i].Extension;
 
-    if (RegisterFormat(ext))
+    if (RegOpenKeyEx(reg, ext, 0, KEY_QUERY_VALUE, &reg2) != ERROR_SUCCESS)
+      reg2 = NULL;
+    else RegCloseKey(reg2);
+    if (RegisterFormat(ext, reg2 != NULL))
     {
-      dllPath = _tcscat(GetFilterDirectory(PathBuffer2), BASS_EXTENSIONS[i].DLL);
+      _tcscpy(plugin, BASS_EXTENSIONS[i].DLL);
       if (FileExists(dllPath))
       {
         //if reg.KeyExists(path)
           RegDeleteKey(reg, ext);
 
-        if (RegCreateKey(reg, ext, &reg2) == ERROR_SUCCESS) {
+        if (RegCreateKeyEx(reg, ext, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &reg2, NULL) == ERROR_SUCCESS) {
         try {
-          RegWriteString(reg2, _T("Source Filter"), guidStr);
+          RegWriteString(reg2, _T("Source Filter"), TCLSID_DCBassSource);
 
           // Special handling of MP3 Files
           if (lstrcmpi(ext, _T(".mp3")) == 0)
@@ -228,11 +255,6 @@ function DllRegisterServer: HResult;
   } finally (
     RegCloseKey(reg);
   )}
-  } finally (
-    CoTaskMemFree(guidStrW);
-  )
-  if (FAILED(result))
-    return result;
 
   return AMovieDllRegisterServer2(TRUE);
 } // DllRegisterServer
@@ -248,7 +270,7 @@ function DllUnregisterServer: HResult;
   LPCTSTR ext;//: WideString;
   //i: Integer;
   //path: WideString;
-  LPCTSTR dllPath;//: String;
+  //dllPath: String;
   HKEY reg2;
   if (RegOpenKey(HKEY_CLASSES_ROOT, DIRECTSHOW_SOURCE_FILTER_PATH, &reg) == ERROR_SUCCESS) {
   try {
@@ -257,26 +279,35 @@ function DllUnregisterServer: HResult;
   {
     ext = BASS_EXTENSIONS[i].Extension;
 
-    if (RegisterFormat(ext))
+    if (RegOpenKeyEx(reg, ext, 0, KEY_QUERY_VALUE, &reg2) != ERROR_SUCCESS)
+      reg2 = NULL;
+    else
     {
-      dllPath = _tcscat(GetFilterDirectory(PathBuffer2), BASS_EXTENSIONS[i].DLL);
-      if (FileExists(dllPath))
-      {
-        //if reg.KeyExists(path)
-          RegDeleteKey(reg, ext);
+      try {
+        if (!RegReadString(reg2, _T("Source Filter"), TextBuffer, TextBufferLength))
+          *TextBuffer = 0;
+      } finally (
+        RegCloseKey(reg2);
+      )
+      if (lstrcmpi(TextBuffer, TCLSID_DCBassSource) != 0)
+        reg2 = NULL;
+    }
+    if (reg2 != NULL)
+    {
+      //if reg.KeyExists(path)
+        RegDeleteKey(reg, ext);
 
-        // Special handling of MP3 Files
-        if (lstrcmpi(ext, _T(".mp3")) == 0)
-        {
-          if (RegCreateKey(reg, ext, &reg2)) {
-          try {
-            RegWriteString(reg2, _T("Source Filter"), _T("{E436EBB5-524F-11CE-9F53-0020AF0BA770}"));
-            RegWriteString(reg2, _T("Media Type"), _T("{E436EB83-524F-11CE-9F53-0020AF0BA770}"));
-            RegWriteString(reg2, _T("Subtype"), _T("{E436EB87-524F-11CE-9F53-0020AF0BA770}"));
-          } finally (
-            RegCloseKey(reg2);
-          )}
-        }
+      // Special handling of MP3 Files
+      if (lstrcmpi(ext, _T(".mp3")) == 0)
+      {
+        if (RegCreateKey(reg, ext, &reg2)) {
+        try {
+          RegWriteString(reg2, _T("Source Filter"), _T("{E436EBB5-524F-11CE-9F53-0020AF0BA770}"));
+          RegWriteString(reg2, _T("Media Type"), _T("{E436EB83-524F-11CE-9F53-0020AF0BA770}"));
+          RegWriteString(reg2, _T("Subtype"), _T("{E436EB87-524F-11CE-9F53-0020AF0BA770}"));
+        } finally (
+          RegCloseKey(reg2);
+        )}
       }
     }
   }

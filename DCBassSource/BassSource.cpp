@@ -47,7 +47,7 @@ constructor TBassSource.Create(const Name: string; unk: IUnknown; const clsid: T
   Init();
 }//end;
 
-void BassSource::Init() /*
+void BassSource::Init()
 {//begin
   this->metaLock = new CCritSec();
 //  FWriteLock := TBCCritSec.Create;
